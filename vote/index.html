@@ -1,1 +1,288 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Vote Talent Show</title>
 
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<style>
+body {
+  font-family: system-ui;
+  background: linear-gradient(135deg,#c084fc,#f472b6);
+  margin:0;
+  padding:24px;
+}
+h1 { text-align:center; color:#fff; }
+
+.grid { max-width:520px; margin:0 auto; display:grid; gap:12px; }
+
+.card {
+  background:#fff;
+  border-radius:14px;
+  padding:16px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+button {
+  padding:10px 14px;
+  border:none;
+  border-radius:10px;
+  cursor:pointer;
+  transition:all .35s ease;
+}
+
+.pick { background:#8b5cf6; color:#fff; }
+.picked { background:#22c55e; color:#fff; }
+
+.hidden { display:none; }
+.locked { pointer-events:none; opacity:.6; }
+
+.status {
+  text-align:center;
+  color:#fff;
+  margin-bottom:12px;
+  font-weight:bold;
+}
+
+/* ===== SUBMIT BUTTON WITH CHECKMARK ===== */
+.submit {
+  position:relative;
+  width:100%;
+  margin-top:16px;
+  font-size:18px;
+  background:#ec4899;
+  color:#fff;
+  overflow:hidden;
+}
+
+.submit .btn-text {
+  transition:opacity .25s ease, transform .25s ease;
+}
+
+.checkmark {
+  position:absolute;
+  inset:0;
+  display:grid;
+  place-items:center;
+  opacity:0;
+}
+
+.checkmark svg {
+  width:30px;
+  height:30px;
+  stroke:#fff;
+  stroke-width:4;
+  fill:none;
+  stroke-dasharray:48;
+  stroke-dashoffset:48;
+}
+
+/* success state */
+.submit.success {
+  background:#22c55e !important;
+}
+
+.submit.success .btn-text {
+  opacity:0;
+  transform:scale(.4);
+}
+
+.submit.success .checkmark {
+  opacity:1;
+}
+
+.submit.success .checkmark svg {
+  animation:drawCheck .45s ease forwards .1s;
+}
+
+@keyframes drawCheck {
+  to { stroke-dashoffset:0 }
+}
+
+/* ===== ADMIN ===== */
+.admin-btn {
+  margin-top:20px;
+  opacity:.5;
+  background:#000;
+  color:#fff;
+}
+
+.bar-bg {
+  background:#ddd;
+  height:16px;
+  border-radius:99px;
+  overflow:hidden;
+  margin-bottom:12px;
+}
+.bar {
+  height:100%;
+  background:linear-gradient(90deg,#ec4899,#8b5cf6);
+}
+</style>
+</head>
+
+<body>
+
+<h1>🎤 Xếp hạng tiết mục yêu thích</h1>
+<div id="status" class="status"></div>
+
+<!-- KHÁN GIẢ -->
+<div id="voteBox" class="grid"></div>
+
+<button id="submitBtn" class="submit hidden">
+  <span class="btn-text">GỬI BÌNH CHỌN</span>
+  <span class="checkmark">
+    <svg viewBox="0 0 52 52">
+      <path d="M14 27 L22 35 L38 18"/>
+    </svg>
+  </span>
+</button>
+
+<button class="admin-btn" onclick="openAdmin()">BTC / MC</button>
+
+<!-- ADMIN -->
+<div id="adminBox" class="hidden">
+  <h1>📊 BAN TỔ CHỨC</h1>
+  <input type="password" id="adminPass" placeholder="Password BTC" />
+  <button onclick="login()">MỞ QUẢN LÝ</button>
+
+  <div id="adminPanel" class="hidden">
+    <button onclick="openVote()">🟢 MỞ VOTE</button>
+    <button onclick="closeVote()">🔴 ĐÓNG VOTE</button>
+    <h2>KẾT QUẢ</h2>
+    <div id="results"></div>
+  </div>
+</div>
+
+<script>
+// ================= FIREBASE =================
+firebase.initializeApp({
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+});
+const db = firebase.firestore();
+
+// ================= CONFIG =================
+const ADMIN_PASSWORD = "123456";
+const votedKey = "talent_voted";
+const CONFIG_DOC = db.collection("votes").doc("config");
+const SCORE_DOC = db.collection("votes").doc("scores");
+
+const TALENTS = [
+  { id:"t1", name:"Tiết mục 1" },
+  { id:"t2", name:"Tiết mục 2" },
+  { id:"t3", name:"Tiết mục 3" },
+  { id:"t4", name:"Tiết mục 4" },
+  { id:"t5", name:"Tiết mục 5" },
+];
+
+const points = [5,4,3,2,1];
+let ranking = [];
+let isVoteOpen = true;
+
+const voteBox = document.getElementById("voteBox");
+const submitBtn = document.getElementById("submitBtn");
+const statusText = document.getElementById("status");
+
+// ================= CHECK ĐÃ VOTE =================
+if (localStorage.getItem(votedKey)) {
+  statusText.innerText = "✅ Bạn đã gửi bình chọn";
+  voteBox.classList.add("locked");
+}
+
+// ================= TRẠNG THÁI VOTE =================
+CONFIG_DOC.onSnapshot(doc=>{
+  if(!doc.exists) return;
+  isVoteOpen = doc.data().isOpen;
+  statusText.innerText = isVoteOpen ? "🟢 ĐANG MỞ VOTE" : "🔴 ĐÃ ĐÓNG VOTE";
+  if(!isVoteOpen) submitBtn.classList.add("hidden");
+});
+
+// ================= KHÁN GIẢ =================
+TALENTS.forEach(t=>{
+  const c = document.createElement("div");
+  c.className="card";
+  c.innerHTML=`<span>${t.name}</span>`;
+  const b = document.createElement("button");
+  b.className="pick";
+  b.innerText="Chọn";
+  b.onclick=()=>{
+    if(!isVoteOpen || ranking.includes(t.id)) return;
+    ranking.push(t.id);
+    b.innerText = "#" + ranking.length;
+    b.className="picked";
+    if(ranking.length===TALENTS.length)
+      submitBtn.classList.remove("hidden");
+  };
+  c.appendChild(b);
+  voteBox.appendChild(c);
+});
+
+// ================= GỬI BÌNH CHỌN =================
+submitBtn.onclick = async ()=>{
+  if(localStorage.getItem(votedKey)) return;
+
+  submitBtn.disabled = true;
+  voteBox.classList.add("locked");
+  submitBtn.classList.add("success");
+
+  const data = {};
+  ranking.forEach((id,idx)=>{
+    data[id] = firebase.firestore.FieldValue.increment(points[idx]);
+  });
+
+  try {
+    await SCORE_DOC.set(data,{merge:true});
+    localStorage.setItem(votedKey,"true");
+    statusText.innerText="✅ Bình chọn đã được ghi nhận";
+  } catch {
+    alert("❌ Lỗi kết nối!");
+    submitBtn.classList.remove("success");
+    submitBtn.disabled=false;
+  }
+};
+
+// ================= ADMIN =================
+function openAdmin(){
+  voteBox.classList.add("hidden");
+  submitBtn.classList.add("hidden");
+  document.querySelector(".admin-btn").classList.add("hidden");
+  adminBox.classList.remove("hidden");
+}
+
+function login(){
+  if(adminPass.value!==ADMIN_PASSWORD) return alert("Sai mật khẩu");
+  adminPanel.classList.remove("hidden");
+  loadResults();
+}
+
+function openVote(){ CONFIG_DOC.set({isOpen:true},{merge:true}); }
+function closeVote(){ CONFIG_DOC.set({isOpen:false},{merge:true}); }
+
+function loadResults(){
+  SCORE_DOC.onSnapshot(doc=>{
+    if(!doc.exists) return;
+    const d=doc.data();
+    const list=TALENTS.map(t=>({name:t.name,v:d[t.id]||0}))
+      .sort((a,b)=>b.v-a.v);
+    const max=Math.max(...list.map(x=>x.v),1);
+    results.innerHTML="";
+    list.forEach((i,idx)=>{
+      results.innerHTML+=`
+        <p>#${idx+1} ${i.name} – ${i.v} điểm</p>
+        <div class="bar-bg">
+          <div class="bar" style="width:${i.v/max*100}%"></div>
+        </div>`;
+    });
+  });
+}
+</script>
+</body>
+</html>
